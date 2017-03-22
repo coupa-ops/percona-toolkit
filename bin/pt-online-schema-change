@@ -9093,11 +9093,15 @@ sub main {
    # random hash key sorting.
    my $col_posn    = $orig_tbl->{tbl_struct}->{col_posn};
    my $orig_cols   = $orig_tbl->{tbl_struct}->{is_col};
+   my $orig_types  = $orig_tbl->{tbl_struct}->{type_for};
    my $new_cols    = $new_tbl->{tbl_struct}->{is_col};
    my @common_cols = map  { +{ old => $_, new => $renamed_cols->{$_} || $_ } }
                      sort { $col_posn->{$a} <=> $col_posn->{$b} }
                      grep { $new_cols->{$_} || $renamed_cols->{$_} }
                      keys %$orig_cols;
+   my %dt_cols     = map  { $_ => $orig_types->{$_} }
+                     grep { $orig_types->{$_} =~ /date|time/ }
+                     keys %$orig_types;
    PTDEBUG && _d('Common columns', Dumper(\@common_cols));
 
    # Find a pk or unique index to use for the delete trigger.  can_nibble()
@@ -9530,7 +9534,19 @@ sub main {
    my $dml = "INSERT LOW_PRIORITY IGNORE INTO $new_tbl->{name} "
            . "(" . join(', ', map { $q->quote($_->{new}) } @common_cols) . ") "
            . "SELECT";
-   my $select = join(', ', map { $q->quote($_->{old}) } @common_cols);
+   #my $select = join(', ', map { $q->quote($_->{old}) } @common_cols);
+
+   my $select = join( ', ',
+                      map {
+                        map {
+                          my $col = $_;
+                          if(grep( /^$col$/, keys %dt_cols )){
+                            'CAST((' . $q->quote($_) . ' + INTERVAL 0 DAY) AS ' . (\%dt_cols)->{$_} . ') AS ' . $q->quote($_);
+                          } else {
+                            $q->quote($_);
+                          }
+                        } $_->{old}
+                      } @common_cols);
 
    # The chunk size is auto-adjusted, so use --chunk-size as
    # the initial value, but then save and update the adjusted
